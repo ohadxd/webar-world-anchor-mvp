@@ -236,6 +236,7 @@
       launch: null,
       error: null
     };
+    let activeSession = null;
 
     boot();
 
@@ -286,19 +287,19 @@
       result.launch = "pending";
       result.error = null;
       setCheck("launch", "pending", "מבקש הרשאת מצלמה ומנסה לפתוח requestSession(\"immersive-ar\") בלי dom-overlay, בלי hit-test ובלי requiredFeatures.");
-      summaryEl.textContent = "אם מופיעה בקשת מצלמה, אשר אותה. הבדיקה תיסגר אוטומטית אם AR נפתח.";
+      summaryEl.textContent = "אם מופיעה בקשת מצלמה, אשר אותה. אם AR נפתח, הוא יישאר פתוח עד שתצא ממנו ידנית.";
       renderDetails();
 
       try {
         const session = await navigator.xr.requestSession("immersive-ar");
-        result.launch = "pass";
-        setCheck("launch", "pass", "requestSession(\"immersive-ar\") נפתח בהצלחה. המכשיר תומך WebXR AR בפועל.");
-        summaryEl.textContent = "תוצאה: המכשיר תומך WebXR AR.";
-        renderDetails();
+        activeSession = session;
+        session.addEventListener("end", onSessionEnded, { once: true });
 
-        window.setTimeout(() => {
-          session.end().catch(() => {});
-        }, 1200);
+        result.launch = "pass";
+        setCheck("launch", "pass", "requestSession(\"immersive-ar\") נפתח בהצלחה ונשאר פתוח. צא מה־AR דרך בקרת הדפדפן/המערכת.");
+        summaryEl.textContent = "תוצאה: המכשיר תומך WebXR AR. ה־AR לא ייסגר אוטומטית.";
+        runBtn.textContent = "AR פתוח";
+        renderDetails();
       } catch (error) {
         result.launch = "fail";
         result.error = plainError(error);
@@ -307,6 +308,15 @@
         runBtn.disabled = false;
         renderDetails();
       }
+    }
+
+    function onSessionEnded() {
+      activeSession = null;
+      runBtn.disabled = false;
+      runBtn.textContent = "בדוק שוב פתיחת AR במצלמה";
+      setCheck("launch", "pass", "ה־AR נפתח בהצלחה ואז נסגר על ידי המשתמש או הדפדפן.");
+      summaryEl.textContent = "תוצאה: המכשיר תומך WebXR AR.";
+      renderDetails();
     }
 
     async function copyResult() {
