@@ -152,47 +152,108 @@
       display: block;
       touch-action: none;
     }
+
+    #xrOverlay {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      background: transparent;
+      pointer-events: none;
+    }
+
+    #infoPanel,
+    #controls,
+    #debugPanel {
+      pointer-events: auto;
+    }
+
+    #debugPanel {
+      position: fixed;
+      left: 12px;
+      right: 12px;
+      bottom: calc(env(safe-area-inset-bottom, 0px) + 248px);
+      z-index: 70;
+      display: none;
+      max-height: 34vh;
+      overflow: auto;
+      direction: ltr;
+      text-align: left;
+      white-space: pre-wrap;
+      font: 12px/1.35 ui-monospace, SFMono-Regular, Consolas, monospace;
+      background: rgba(0, 0, 0, 0.82);
+      border: 1px solid rgba(255,255,255,0.24);
+      border-radius: 10px;
+      padding: 10px;
+      color: #d9f99d;
+    }
+
+    #debugPanel.visible {
+      display: block;
+    }
+
+    #debugPanel strong {
+      display: block;
+      color: white;
+      margin-bottom: 6px;
+    }
   </style>
 </head>
 <body>
-  <div id="infoPanel">
-    <div id="title">משימת AR: עגינה לתחנת החלל</div>
-    <div id="status">
-      לחץ על Start AR ואשר מצלמה. אחרי שהמצלמה נפתחת, טען את תחנת החלל 2 מטר קדימה.
+  <div id="xrOverlay">
+    <div id="infoPanel">
+      <div id="title">משימת AR: עגינה לתחנת החלל</div>
+      <div id="status">
+        לחץ על Start AR ואשר מצלמה. אחרי שהמצלמה נפתחת, טען את תחנת החלל 2 מטר קדימה.
+      </div>
     </div>
-  </div>
 
-  <div id="controls">
-    <div id="progressWrap"><div id="progress"></div></div>
-    <button id="placeBtn" class="action">טען תחנת חלל 2 מטר קדימה</button>
-    <button id="resetBtn" class="action secondary">איפוס משימה</button>
-  </div>
+    <div id="controls">
+      <div id="progressWrap"><div id="progress"></div></div>
+      <button id="startArBtn" class="action">Start AR</button>
+      <button id="placeBtn" class="action">טען תחנת חלל 2 מטר קדימה</button>
+      <button id="resetBtn" class="action secondary">איפוס משימה</button>
+    </div>
 
-  <div id="passportPage">
-    <div class="page">
-      <h1>העגינה הושלמה</h1>
-      <p>הגעת לתחנת החלל וקיבלת חותמת בדרכון.</p>
-      <div class="stamp">הושלם</div>
+    <div id="debugPanel" aria-live="polite">
+      <strong>AR debug</strong>
+      <div id="debugLog"></div>
+    </div>
+
+    <div id="passportPage">
+      <div class="page">
+        <h1>העגינה הושלמה</h1>
+        <p>הגעת לתחנת החלל וקיבלת חותמת בדרכון.</p>
+        <div class="stamp">הושלם</div>
+      </div>
     </div>
   </div>
 
   <script type="module">
     import * as THREE from "https://esm.sh/three@0.160.0";
-    import { ARButton } from "https://esm.sh/three@0.160.0/examples/jsm/webxr/ARButton.js";
     import { GLTFLoader } from "https://esm.sh/three@0.160.0/examples/jsm/loaders/GLTFLoader.js";
 
     const statusEl = document.getElementById("status");
+    const startArBtn = document.getElementById("startArBtn");
     const placeBtn = document.getElementById("placeBtn");
     const resetBtn = document.getElementById("resetBtn");
     const progressWrap = document.getElementById("progressWrap");
     const progressEl = document.getElementById("progress");
     const passportPage = document.getElementById("passportPage");
+    const xrOverlay = document.getElementById("xrOverlay");
+    const debugPanel = document.getElementById("debugPanel");
+    const debugLogEl = document.getElementById("debugLog");
+
+    const debugEnabled = new URLSearchParams(location.search).has("debug");
+    const debugLines = [];
+    const maxDebugLines = 80;
 
     let camera, scene, renderer;
     let station = null;
     let stationPlaced = false;
     let completed = false;
     let holdTimer = 0;
+    let arSupported = false;
+    let loggedFirstArFrame = false;
     const clock = new THREE.Clock();
 
     const MODEL_URL = "./models/iss.glb";
@@ -201,9 +262,36 @@
     const TRIGGER_DISTANCE_METERS = 0.75;
     const HOLD_SECONDS = 1.35;
 
+    if (debugEnabled) {
+      debugPanel.classList.add("visible");
+    }
+
+    window.addEventListener("error", (event) => {
+      debugLog("window error", {
+        message: event.message,
+        source: event.filename,
+        line: event.lineno,
+        column: event.colno,
+        error: errorToPlain(event.error)
+      });
+    });
+
+    window.addEventListener("unhandledrejection", (event) => {
+      debugLog("unhandled rejection", errorToPlain(event.reason));
+    });
+
     init();
 
     function init() {
+      debugLog("init", {
+        href: location.href,
+        secure: window.isSecureContext,
+        hasXR: "xr" in navigator,
+        userAgent: navigator.userAgent,
+        viewport: `${window.innerWidth}x${window.innerHeight}`,
+        dpr: window.devicePixelRatio
+      });
+
       scene = new THREE.Scene();
 
       camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 80);
@@ -229,6 +317,8 @@
       addStartARButton();
 
       window.addEventListener("resize", onWindowResize);
+      startArBtn.addEventListener("click", onStartArClick);
+      startArBtn.disabled = true;
       placeBtn.addEventListener("click", placeStationTwoMetersAhead);
       placeBtn.disabled = true;
       resetBtn.addEventListener("click", resetMission);
@@ -239,58 +329,92 @@
     function addStartARButton() {
       if (!window.isSecureContext) {
         statusEl.innerHTML = "WebXR דורש HTTPS או localhost. אם הדף פתוח ב־HTTP רגיל, הדפדפן לא יפתח מצלמה.";
+        debugLog("blocked: insecure context");
         return;
       }
 
       if (!("xr" in navigator)) {
         statusEl.innerHTML = "המכשיר או הדפדפן לא חושף WebXR. נסה Chrome באנדרואיד עם Google Play Services for AR.";
+        debugLog("blocked: navigator.xr missing");
         return;
       }
 
-      const arButton = ARButton.createButton(renderer, {
-        optionalFeatures: ["dom-overlay", "hit-test"],
-        domOverlay: { root: document.body }
-      });
-
-      arButton.style.right = "12px";
-      arButton.style.left = "auto";
-      arButton.style.bottom = "calc(env(safe-area-inset-bottom, 0px) + 180px)";
-      arButton.style.borderRadius = "16px";
-      arButton.style.padding = "12px 18px";
-      arButton.style.fontWeight = "800";
-      arButton.addEventListener("click", () => {
-        statusEl.textContent = "מבקש הרשאת מצלמה וכניסה ל־AR...";
-      });
-      document.body.appendChild(arButton);
-
       navigator.xr.isSessionSupported("immersive-ar")
         .then((supported) => {
+          arSupported = supported;
+          debugLog("isSessionSupported immersive-ar", { supported });
           if (!supported) {
             statusEl.textContent = "AR לא נתמך במכשיר הזה. נדרש Chrome באנדרואיד עם ARCore פעיל.";
             return;
           }
+          startArBtn.disabled = false;
           statusEl.textContent = "מוכן. לחץ Start AR ואשר מצלמה.";
         })
-        .catch(() => {
+        .catch((error) => {
+          debugLog("isSessionSupported failed", errorToPlain(error));
           statusEl.textContent = "לא הצלחתי לבדוק תמיכת AR. ודא שהדף רץ ב־HTTPS ונסה שוב.";
         });
 
       renderer.xr.addEventListener("sessionstart", () => {
+        loggedFirstArFrame = false;
+        startArBtn.textContent = "Exit AR";
+        startArBtn.disabled = false;
         placeBtn.disabled = false;
+        debugLog("renderer.xr sessionstart");
         statusEl.textContent = "המצלמה פעילה. לחץ על טעינת תחנת החלל כדי להציב אותה בחדר.";
       });
 
       renderer.xr.addEventListener("sessionend", () => {
+        startArBtn.textContent = "Start AR";
+        startArBtn.disabled = !arSupported;
         placeBtn.disabled = true;
         stationPlaced = false;
         holdTimer = 0;
+        loggedFirstArFrame = false;
         progressEl.style.width = "0%";
         progressWrap.style.display = "none";
         removeStation();
+        debugLog("renderer.xr sessionend");
         if (!completed) {
           statusEl.textContent = "יצאת מ־AR. לחץ Start AR כדי לפתוח שוב את המצלמה.";
         }
       });
+    }
+
+    async function onStartArClick() {
+      if (renderer.xr.isPresenting) {
+        const session = renderer.xr.getSession();
+        debugLog("ending AR session");
+        try {
+          await session?.end();
+        } catch (error) {
+          debugLog("session.end failed", errorToPlain(error));
+        }
+        return;
+      }
+
+      startArBtn.disabled = true;
+      statusEl.textContent = "מבקש הרשאת מצלמה וכניסה ל־AR...";
+
+      const sessionInit = {
+        optionalFeatures: ["dom-overlay"],
+        domOverlay: { root: xrOverlay }
+      };
+
+      debugLog("requestSession immersive-ar", sessionInit);
+
+      try {
+        const session = await navigator.xr.requestSession("immersive-ar", sessionInit);
+        debugLog("requestSession resolved");
+        session.addEventListener("end", () => debugLog("native XRSession end"));
+        await renderer.xr.setSession(session);
+        debugLog("renderer.xr.setSession resolved");
+      } catch (error) {
+        const plainError = errorToPlain(error);
+        debugLog("requestSession failed", plainError);
+        startArBtn.disabled = false;
+        statusEl.textContent = `AR לא נפתח: ${plainError.name || "Error"} - ${plainError.message || "אין פירוט שגיאה"}`;
+      }
     }
 
     function placeStationTwoMetersAhead() {
@@ -334,10 +458,12 @@
 
     function loadModelInto(parent) {
       const loader = new GLTFLoader();
+      debugLog("loading model", { url: MODEL_URL });
 
       loader.load(
         MODEL_URL,
         (gltf) => {
+          debugLog("model loaded");
           const model = gltf.scene;
           fitModelToTargetSize(model, TARGET_MODEL_SIZE_METERS);
           parent.add(model);
@@ -355,6 +481,7 @@
         },
         (error) => {
           console.error("Failed to load GLB model", error);
+          debugLog("model load failed", errorToPlain(error));
           // fallback אם GLB לא נטען
           createFallbackSpaceStation(parent);
           addFloatingLabel(parent, "ISS TARGET");
@@ -446,6 +573,11 @@
     function render() {
       const delta = clock.getDelta();
 
+      if (renderer.xr.isPresenting && !loggedFirstArFrame) {
+        loggedFirstArFrame = true;
+        debugLog("first AR render frame");
+      }
+
       if (stationPlaced && station && !completed && renderer.xr.isPresenting) {
         checkDistanceTrigger(delta);
         station.rotation.y += 0.006;
@@ -530,6 +662,60 @@
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function debugLog(message, data = null) {
+      if (!debugEnabled) {
+        return;
+      }
+
+      const time = new Date().toLocaleTimeString("en-GB", { hour12: false });
+      const details = data === null ? "" : ` ${formatDebugData(data)}`;
+      debugLines.push(`[${time}] ${message}${details}`);
+
+      if (debugLines.length > maxDebugLines) {
+        debugLines.shift();
+      }
+
+      debugLogEl.textContent = debugLines.join("\n");
+      debugPanel.scrollTop = debugPanel.scrollHeight;
+      console.info("[AR debug]", message, data);
+    }
+
+    function formatDebugData(data) {
+      if (typeof data === "string") {
+        return data;
+      }
+
+      try {
+        return JSON.stringify(data, null, 2);
+      } catch {
+        return String(data);
+      }
+    }
+
+    function errorToPlain(error) {
+      if (!error) {
+        return null;
+      }
+
+      if (error instanceof Error) {
+        return {
+          name: error.name,
+          message: error.message,
+          stack: error.stack
+        };
+      }
+
+      if (typeof error === "object") {
+        return {
+          name: error.name,
+          message: error.message,
+          code: error.code
+        };
+      }
+
+      return { message: String(error) };
     }
   </script>
 </body>
