@@ -1,56 +1,27 @@
-# WebAR World Anchor MVP
+# WebXR AR Support Check
 
-זה דמו בסיסי למה שביקשת:
+דף בדיקה מינימלי לתמיכת WebXR AR במכשיר.
 
-- פותחים WebAR באנדרואיד
-- לוחצים "טען תחנת חלל 2 מטר קדימה"
-- המודל נטען בחלל החדר, לא על מרקר
-- המשתמש הולך אליו פיזית
-- כשקרובים מספיק למשך רגע, מופעל "דף מתהפך" וחותמת
-- נשמר localStorage בשם `passport_station_iss_docking`
+הבדיקה עושה ארבעה דברים:
 
-## איך מריצים נכון
+1. מוודאת שהדף רץ ב-secure context (`https://` או `localhost`).
+2. בודקת אם `navigator.xr` קיים.
+3. מריצה `navigator.xr.isSessionSupported("immersive-ar")`.
+4. בלחיצה על הכפתור, מריצה `navigator.xr.requestSession("immersive-ar")` בלי `dom-overlay`, בלי `hit-test`, ובלי `requiredFeatures`.
 
-WebXR חייב HTTPS. פתיחה כקובץ מקומי (`file://`) בדרך כלל לא תעבוד.
+אם שלב 4 מצליח, המכשיר תומך WebXR AR בפועל.
 
-הדרך הכי קלה:
-1. העלה את התיקייה ל-Netlify / Vercel / GitHub Pages
-2. פתח את הקישור באנדרואיד עם Chrome
-3. ודא שמותקן/פעיל Google Play Services for AR / ARCore
-4. לחץ Start AR
-5. לחץ "טען תחנת חלל 2 מטר קדימה"
+אם שלב 4 מחזיר `The specified session configuration is not supported`, למרות שאין configuration בכלל, המשמעות היא בדרך כלל ש-Chrome / המכשיר / Google Play Services for AR לא יכולים לפתוח `immersive-ar`.
 
-אם פתחת את הדף במחשב, באייפון, או בדפדפן בלי WebXR immersive-ar, לא תיפתח מצלמת AR. במקרה כזה הדף אמור להציג הודעת אי-תמיכה במקום להיתקע בשקט.
+## דרישות
 
-## מודל ה-ISS
+- Android עם Chrome מלא, לא WebView.
+- מכשיר שתומך ARCore.
+- Google Play Services for AR מותקן, פעיל ומעודכן.
+- פריסה ב-HTTPS, למשל GitHub Pages.
 
-הדמו נטען כברירת מחדל מהקובץ המקומי:
+## הרצה
 
-```js
-const MODEL_URL = "./models/iss.glb";
-```
+הפרויקט סטטי. אפשר להעלות ל-GitHub Pages ולפתוח באנדרואיד:
 
-אם הקובץ לא נטען בפריסה, הדף יציג fallback פנימי כדי שה-AR עצמו עדיין יהיה ניתן לבדיקה.
-
-## חיבור לדרכון האמיתי
-
-בקוד יש פונקציה:
-
-```js
-completeStation()
-```
-
-שם מחברים לדרכון:
-
-```js
-localStorage.setItem("passport_station_iss_docking", "completed");
-window.parent?.postMessage({ type: "AR_STATION_COMPLETED", stationId: "iss-docking" }, "*");
-location.href = "/passport/YOUR_SESSION_ID?completed=iss-docking";
-```
-
-## הערות חשובות
-
-- זה לא Marker AR. אין צורך Hiro/Kanji.
-- זה World Tracking דרך WebXR.
-- הכי מתאים לבדיקה באנדרואיד Chrome.
-- באייפון Safari זה לא אותו API, ושם תצטרך ARKit אפליקציה או AR Quick Look מוגבל יותר.
+`https://funlab.co.il/webar-world-anchor-mvp/`
