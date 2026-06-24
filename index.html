@@ -3,23 +3,20 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>בדיקת תמיכת WebXR AR</title>
+  <title>WebXR AR Model Loader</title>
   <link rel="icon" href="data:," />
   <style>
     :root {
       color-scheme: dark;
       --bg: #071018;
-      --panel: #0e1a24;
-      --panel-soft: #132636;
-      --border: #294257;
-      --text: #f4f7fb;
-      --muted: #b6c3d1;
-      --good: #53d769;
-      --bad: #ff5f57;
-      --wait: #ffd166;
-      --idle: #7890a4;
-      --button: #f4f7fb;
-      --button-text: #06111f;
+      --panel: rgba(8, 17, 27, 0.78);
+      --panel-solid: #101d29;
+      --border: rgba(255, 255, 255, 0.2);
+      --text: #f6f9fc;
+      --muted: #c1cedb;
+      --button: #f6f9fc;
+      --button-text: #071018;
+      --danger: #ff5f57;
     }
 
     * {
@@ -29,452 +26,535 @@
     html,
     body {
       margin: 0;
-      min-height: 100%;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background: var(--bg);
       color: var(--text);
     }
 
-    body {
-      display: flex;
-      justify-content: center;
-      padding: max(18px, env(safe-area-inset-top)) 14px max(24px, env(safe-area-inset-bottom));
+    canvas {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
     }
 
-    main {
-      width: min(100%, 680px);
+    #xrOverlay {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      background: transparent;
+      pointer-events: none;
+    }
+
+    #topBar,
+    #bottomBar,
+    #fallbackPanel {
+      pointer-events: auto;
+    }
+
+    #topBar {
+      position: fixed;
+      top: max(12px, env(safe-area-inset-top));
+      left: 12px;
+      right: 12px;
       display: grid;
-      gap: 14px;
-      align-content: start;
+      grid-template-columns: 44px 1fr;
+      gap: 10px;
+      align-items: start;
     }
 
-    header,
-    section {
+    #exitBtn {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: rgba(0, 0, 0, 0.64);
+      color: white;
+      font-size: 26px;
+      line-height: 1;
+      font-weight: 700;
+      display: none;
+      place-items: center;
+      padding: 0 0 3px;
+    }
+
+    body.in-ar #exitBtn {
+      display: grid;
+    }
+
+    #statusPanel {
+      min-height: 44px;
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 16px;
+      padding: 11px 12px;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
     }
 
-    h1 {
-      margin: 0 0 8px;
-      font-size: 22px;
-      line-height: 1.2;
+    #title {
+      font-weight: 850;
+      font-size: 17px;
+      margin-bottom: 4px;
     }
 
-    p {
-      margin: 0;
+    #status {
       color: var(--muted);
-      line-height: 1.5;
-      font-size: 15px;
+      font-size: 14px;
+      line-height: 1.4;
     }
 
-    .controls {
+    #bottomBar {
+      position: fixed;
+      left: 12px;
+      right: 12px;
+      bottom: max(16px, env(safe-area-inset-bottom));
       display: grid;
-      grid-template-columns: 1fr;
       gap: 10px;
     }
 
     button {
       border: 0;
       border-radius: 8px;
-      min-height: 48px;
-      padding: 12px 14px;
+      min-height: 50px;
+      padding: 13px 16px;
       font: inherit;
-      font-weight: 800;
+      font-size: 16px;
+      font-weight: 850;
       color: var(--button-text);
       background: var(--button);
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
     }
 
     button.secondary {
-      color: var(--text);
-      background: var(--panel-soft);
+      color: white;
+      background: rgba(255, 255, 255, 0.14);
       border: 1px solid var(--border);
-      font-weight: 700;
+      box-shadow: none;
     }
 
     button:disabled {
-      opacity: 0.48;
+      opacity: 0.45;
+      box-shadow: none;
     }
 
-    .checks {
-      display: grid;
-      gap: 10px;
+    body.in-ar #startBtn,
+    body:not(.in-ar) #placeBtn {
+      display: none;
     }
 
-    .check {
-      display: grid;
-      grid-template-columns: auto 1fr;
-      gap: 10px;
-      align-items: start;
-      padding: 12px;
-      background: var(--panel-soft);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-    }
-
-    .dot {
-      width: 14px;
-      height: 14px;
-      margin-top: 4px;
-      border-radius: 50%;
-      background: var(--idle);
-    }
-
-    .check[data-state="pass"] .dot {
-      background: var(--good);
-    }
-
-    .check[data-state="fail"] .dot {
-      background: var(--bad);
-    }
-
-    .check[data-state="pending"] .dot {
-      background: var(--wait);
-    }
-
-    .check-title {
-      font-weight: 800;
-      margin-bottom: 3px;
-    }
-
-    .check-detail {
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.45;
-      direction: ltr;
-      text-align: left;
-      overflow-wrap: anywhere;
-    }
-
-    .check-detail.he {
-      direction: rtl;
-      text-align: right;
-    }
-
-    pre {
-      margin: 0;
+    #fallbackPanel {
+      position: fixed;
+      left: 12px;
+      right: 12px;
+      bottom: calc(max(16px, env(safe-area-inset-bottom)) + 70px);
+      display: none;
       direction: ltr;
       text-align: left;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
-      color: var(--muted);
-      font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+      max-height: 28vh;
+      overflow: auto;
+      background: rgba(0, 0, 0, 0.78);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      color: #d6e8ff;
+      font: 12px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
     }
 
-    #xrCanvas {
-      position: fixed;
-      inset: 0;
-      width: 1px;
-      height: 1px;
-      opacity: 0;
-      pointer-events: none;
+    #fallbackPanel.visible {
+      display: block;
     }
   </style>
 </head>
 <body>
-  <main>
-    <header>
-      <h1>בדיקת תמיכת WebXR AR</h1>
-      <p id="summary">בודק אם הדפדפן והמכשיר יכולים לפתוח AR אמיתי דרך WebXR.</p>
-    </header>
-
-    <section class="controls">
-      <button id="runBtn" disabled>בדוק פתיחת AR במצלמה</button>
-      <button id="copyBtn" class="secondary">העתק תוצאת בדיקה</button>
-    </section>
-
-    <section class="checks" aria-live="polite">
-      <div id="secureCheck" class="check" data-state="pending">
-        <div class="dot"></div>
-        <div>
-          <div class="check-title">Secure context</div>
-          <div class="check-detail">בודק HTTPS או localhost...</div>
-        </div>
+  <div id="xrOverlay">
+    <div id="topBar">
+      <button id="exitBtn" type="button" aria-label="יציאה מ־AR">×</button>
+      <div id="statusPanel">
+        <div id="title">טעינת מודל ב־AR</div>
+        <div id="status">בודק תמיכת AR במכשיר...</div>
       </div>
+    </div>
 
-      <div id="apiCheck" class="check" data-state="idle">
-        <div class="dot"></div>
-        <div>
-          <div class="check-title">WebXR API</div>
-          <div class="check-detail">ממתין לבדיקת הדפדפן.</div>
-        </div>
-      </div>
+    <div id="fallbackPanel"></div>
 
-      <div id="supportCheck" class="check" data-state="idle">
-        <div class="dot"></div>
-        <div>
-          <div class="check-title">immersive-ar support</div>
-          <div class="check-detail">ממתין ל־navigator.xr.isSessionSupported("immersive-ar").</div>
-        </div>
-      </div>
+    <div id="bottomBar">
+      <button id="startBtn" type="button" disabled>פתח מצלמת AR</button>
+      <button id="placeBtn" type="button" disabled>טען מודל 2 מטר קדימה</button>
+      <button id="resetBtn" class="secondary" type="button">איפוס מודל</button>
+    </div>
+  </div>
 
-      <div id="launchCheck" class="check" data-state="idle">
-        <div class="dot"></div>
-        <div>
-          <div class="check-title">פתיחת AR בפועל</div>
-          <div class="check-detail">לחיצה על הכפתור תבקש הרשאת מצלמה, תפתח requestSession("immersive-ar"), ותחבר XRWebGLLayer שקוף כדי לראות מצלמה.</div>
-        </div>
-      </div>
-    </section>
+  <script type="module">
+    import * as THREE from "https://esm.sh/three@0.160.0";
+    import { GLTFLoader } from "https://esm.sh/three@0.160.0/examples/jsm/loaders/GLTFLoader.js";
 
-    <section>
-      <pre id="details"></pre>
-    </section>
-  </main>
+    const xrOverlay = document.getElementById("xrOverlay");
+    const statusEl = document.getElementById("status");
+    const startBtn = document.getElementById("startBtn");
+    const placeBtn = document.getElementById("placeBtn");
+    const exitBtn = document.getElementById("exitBtn");
+    const resetBtn = document.getElementById("resetBtn");
+    const fallbackPanel = document.getElementById("fallbackPanel");
 
-  <canvas id="xrCanvas" aria-hidden="true"></canvas>
+    const MODEL_URL = "./models/iss.glb";
+    const TARGET_MODEL_SIZE_METERS = 1.25;
 
-  <script>
-    const summaryEl = document.getElementById("summary");
-    const runBtn = document.getElementById("runBtn");
-    const copyBtn = document.getElementById("copyBtn");
-    const detailsEl = document.getElementById("details");
-    const xrCanvas = document.getElementById("xrCanvas");
+    let scene;
+    let camera;
+    let renderer;
+    let station = null;
+    let arSupported = false;
+    let overlayActive = false;
+    let pendingAutoPlaceFrames = 0;
 
-    const checks = {
-      secure: document.getElementById("secureCheck"),
-      api: document.getElementById("apiCheck"),
-      support: document.getElementById("supportCheck"),
-      launch: document.getElementById("launchCheck")
-    };
+    init();
 
-    const result = {
-      url: location.href,
-      userAgent: navigator.userAgent,
-      secureContext: window.isSecureContext,
-      hasNavigatorXR: false,
-      hasXRWebGLLayer: "XRWebGLLayer" in window,
-      hasWebGL: false,
-      isSessionSupported: null,
-      launch: null,
-      firstXRFrame: false,
-      error: null
-    };
-    let activeSession = null;
-    let activeGl = null;
-    let activeReferenceSpace = null;
+    async function init() {
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 80);
 
-    boot();
+      renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: true
+      });
+      renderer.setClearColor(0x000000, 0);
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      renderer.xr.setReferenceSpaceType("local");
+      document.body.appendChild(renderer.domElement);
 
-    runBtn.addEventListener("click", runLaunchTest);
-    copyBtn.addEventListener("click", copyResult);
+      scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 2.4));
 
-    async function boot() {
-      setCheck("secure", window.isSecureContext ? "pass" : "fail", window.isSecureContext
-        ? "הדף רץ ב־secure context תקין."
-        : "WebXR דורש HTTPS או localhost. הדף הנוכחי לא עומד בזה.");
+      const dir = new THREE.DirectionalLight(0xffffff, 1.4);
+      dir.position.set(2, 4, 3);
+      scene.add(dir);
 
-      result.hasNavigatorXR = "xr" in navigator;
-      setCheck("api", result.hasNavigatorXR ? "pass" : "fail", result.hasNavigatorXR
-        ? "navigator.xr קיים בדפדפן."
-        : "navigator.xr לא קיים. זה בדרך כלל אומר שהדפדפן או הסביבה לא תומכים WebXR.");
+      window.addEventListener("resize", onWindowResize);
+      startBtn.addEventListener("click", startAR);
+      placeBtn.addEventListener("click", placeModelTwoMetersAhead);
+      exitBtn.addEventListener("click", exitAR);
+      resetBtn.addEventListener("click", resetModel);
 
-      result.hasWebGL = canCreateWebGLContext();
+      renderer.xr.addEventListener("sessionstart", onSessionStart);
+      renderer.xr.addEventListener("sessionend", onSessionEnd);
+      renderer.setAnimationLoop(render);
 
-      if (!window.isSecureContext || !result.hasNavigatorXR || !result.hasXRWebGLLayer || !result.hasWebGL) {
-        setCheck("support", "fail", "אי אפשר להמשיך בלי secure context, navigator.xr, XRWebGLLayer ו־WebGL.");
-        summaryEl.textContent = "המכשיר או הדפדפן לא עוברים את תנאי הבסיס ל־WebXR AR.";
-        renderDetails();
+      await checkSupport();
+    }
+
+    async function checkSupport() {
+      if (!window.isSecureContext) {
+        setStatus("WebXR דורש HTTPS או localhost. הדף הזה לא יכול לפתוח מצלמת AR בלי secure context.");
         return;
       }
 
-      setCheck("support", "pending", "בודק navigator.xr.isSessionSupported(\"immersive-ar\")...");
-
-      try {
-        result.isSessionSupported = await navigator.xr.isSessionSupported("immersive-ar");
-
-        if (result.isSessionSupported) {
-          setCheck("support", "pass", "הדפדפן מדווח ש־immersive-ar נתמך. עכשיו צריך לבדוק פתיחת session אמיתית.");
-          summaryEl.textContent = "בדיקת התמיכה הראשונית עברה. לחץ על הכפתור כדי לבדוק פתיחת AR בפועל.";
-          runBtn.disabled = false;
-        } else {
-          setCheck("support", "fail", "isSessionSupported החזיר false. המכשיר/Chrome/ARCore לא מדווחים על תמיכת immersive-ar.");
-          summaryEl.textContent = "המכשיר לא מדווח על תמיכת WebXR immersive-ar.";
-        }
-      } catch (error) {
-        result.error = plainError(error);
-        setCheck("support", "fail", formatError(error));
-        summaryEl.textContent = "בדיקת isSessionSupported נכשלה.";
+      if (!("xr" in navigator)) {
+        setStatus("הדפדפן לא חושף navigator.xr. באנדרואיד צריך Chrome מלא עם Google Play Services for AR.");
+        return;
       }
 
-      renderDetails();
+      try {
+        arSupported = await navigator.xr.isSessionSupported("immersive-ar");
+      } catch (error) {
+        setStatus(`בדיקת AR נכשלה: ${formatError(error)}`);
+        return;
+      }
+
+      if (!arSupported) {
+        setStatus("המכשיר/דפדפן לא מדווחים על תמיכת immersive-ar.");
+        return;
+      }
+
+      startBtn.disabled = false;
+      setStatus("מוכן. לחץ “פתח מצלמת AR”. בתוך המצלמה יהיה X וכפתור טעינת מודל.");
     }
 
-    async function runLaunchTest() {
-      runBtn.disabled = true;
-      result.launch = "pending";
-      result.firstXRFrame = false;
-      result.error = null;
-      setCheck("launch", "pending", "מבקש הרשאת מצלמה, פותח requestSession(\"immersive-ar\"), ומחבר XRWebGLLayer שקוף כדי שהמצלמה תופיע.");
-      summaryEl.textContent = "אם מופיעה בקשת מצלמה, אשר אותה. אם AR נפתח, המצלמה תישאר פתוחה עד שתצא ידנית.";
-      renderDetails();
-
-      let session = null;
+    async function startAR() {
+      startBtn.disabled = true;
+      setStatus("פותח מצלמת AR...");
 
       try {
-        session = await navigator.xr.requestSession("immersive-ar");
-        activeSession = session;
-        session.addEventListener("end", onSessionEnded, { once: true });
-        await startXRPresentation(session);
+        const session = await requestSessionWithOverlayFallback();
+        overlayActive = Boolean(session.domOverlayState);
+        await renderer.xr.setSession(session);
 
-        result.launch = "pass";
-        setCheck("launch", "pass", "ה־XRSession נפתח, שכבת WebGL חוברה, והדף ממתין לפריים AR ראשון.");
-        summaryEl.textContent = "תוצאה: המכשיר תומך WebXR AR. ה־AR לא ייסגר אוטומטית.";
-        runBtn.textContent = "AR פתוח";
-        renderDetails();
-      } catch (error) {
-        if (session) {
-          session.end().catch(() => {});
+        if (!overlayActive) {
+          pendingAutoPlaceFrames = 24;
+          setStatus("AR נפתח בלי DOM overlay. המודל ייטען אוטומטית 2 מטר קדימה; ליציאה השתמש בכפתור הדפדפן.");
         }
-
-        activeSession = null;
-        activeGl = null;
-        activeReferenceSpace = null;
-        result.launch = "fail";
-        result.error = plainError(error);
-        setCheck("launch", "fail", `${formatError(error)} ${explainLaunchError(error)}`);
-        summaryEl.textContent = "תוצאה: פתיחת WebXR AR נכשלה במכשיר הזה.";
-        runBtn.disabled = false;
-        renderDetails();
+      } catch (error) {
+        startBtn.disabled = false;
+        setStatus(`AR לא נפתח: ${formatError(error)}`);
+        logDetails({
+          error: plainError(error),
+          userAgent: navigator.userAgent
+        });
       }
     }
 
-    function onSessionEnded() {
-      activeSession = null;
-      activeGl = null;
-      activeReferenceSpace = null;
-      runBtn.disabled = false;
-      runBtn.textContent = "בדוק שוב פתיחת AR במצלמה";
-      setCheck("launch", "pass", "ה־AR נפתח בהצלחה ואז נסגר על ידי המשתמש או הדפדפן.");
-      summaryEl.textContent = "תוצאה: המכשיר תומך WebXR AR.";
-      renderDetails();
+    async function requestSessionWithOverlayFallback() {
+      const overlaySessionInit = {
+        optionalFeatures: ["dom-overlay"],
+        domOverlay: { root: xrOverlay }
+      };
+
+      try {
+        return await navigator.xr.requestSession("immersive-ar", overlaySessionInit);
+      } catch (error) {
+        logDetails({
+          overlaySessionFailed: plainError(error),
+          retrying: "navigator.xr.requestSession('immersive-ar')"
+        });
+        return navigator.xr.requestSession("immersive-ar");
+      }
     }
 
-    async function startXRPresentation(session) {
-      const gl = xrCanvas.getContext("webgl", {
-        alpha: true,
-        antialias: true,
-        depth: true,
-        stencil: false,
-        preserveDrawingBuffer: false
+    function onSessionStart() {
+      document.body.classList.add("in-ar");
+      placeBtn.disabled = false;
+      startBtn.disabled = true;
+      setStatus(overlayActive
+        ? "המצלמה פתוחה. לחץ “טען מודל 2 מטר קדימה”, או X כדי לצאת."
+        : "המצלמה פתוחה. אין DOM overlay במכשיר הזה, לכן המודל ייטען אוטומטית.");
+    }
+
+    function onSessionEnd() {
+      document.body.classList.remove("in-ar");
+      placeBtn.disabled = true;
+      startBtn.disabled = !arSupported;
+      overlayActive = false;
+      pendingAutoPlaceFrames = 0;
+      setStatus("יצאת מ־AR. אפשר לפתוח שוב את המצלמה.");
+    }
+
+    async function exitAR() {
+      const session = renderer.xr.getSession();
+      if (!session) return;
+
+      try {
+        await session.end();
+      } catch (error) {
+        setStatus(`לא הצלחתי לצאת מ־AR: ${formatError(error)}`);
+      }
+    }
+
+    function placeModelTwoMetersAhead() {
+      if (!renderer.xr.isPresenting) {
+        setStatus("קודם צריך לפתוח מצלמת AR.");
+        return;
+      }
+
+      resetModel();
+
+      const camPos = new THREE.Vector3();
+      const forward = new THREE.Vector3();
+      getCameraPose(camPos, forward);
+
+      forward.y = 0;
+      if (forward.lengthSq() < 0.0001) {
+        forward.set(0, 0, -1);
+      } else {
+        forward.normalize();
+      }
+
+      const targetPos = camPos.clone().add(forward.multiplyScalar(2));
+      targetPos.y = camPos.y - 0.15;
+
+      station = new THREE.Group();
+      station.position.copy(targetPos);
+      scene.add(station);
+
+      addWaypointRing(station);
+      loadModel(station);
+      setStatus("טוען מודל 2 מטר קדימה...");
+    }
+
+    function loadModel(parent) {
+      const loader = new GLTFLoader();
+
+      loader.load(
+        MODEL_URL,
+        (gltf) => {
+          const model = gltf.scene;
+          fitModelToTargetSize(model, TARGET_MODEL_SIZE_METERS);
+          parent.add(model);
+          addFloatingLabel(parent, "2m TARGET");
+          setStatus("המודל נטען. אפשר לזוז אליו במרחב.");
+        },
+        (event) => {
+          if (!event.lengthComputable) {
+            setStatus("טוען מודל...");
+            return;
+          }
+
+          setStatus(`טוען מודל... ${Math.round((event.loaded / event.total) * 100)}%`);
+        },
+        (error) => {
+          createFallbackModel(parent);
+          addFloatingLabel(parent, "2m TARGET");
+          setStatus(`ה־GLB לא נטען, אז נטען מודל fallback. ${formatError(error)}`);
+        }
+      );
+    }
+
+    function addWaypointRing(parent) {
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(0.65, 0.025, 12, 80),
+        new THREE.MeshBasicMaterial({ color: 0x4fd1ff })
+      );
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = -0.55;
+      parent.add(ring);
+
+      const dot = new THREE.Mesh(
+        new THREE.SphereGeometry(0.07, 24, 24),
+        new THREE.MeshBasicMaterial({ color: 0xffffff })
+      );
+      dot.position.y = 0.75;
+      parent.add(dot);
+    }
+
+    function createFallbackModel(parent) {
+      const bodyMat = new THREE.MeshStandardMaterial({ color: 0xdde8ff, metalness: 0.2, roughness: 0.38 });
+      const panelMat = new THREE.MeshStandardMaterial({ color: 0x16233f, metalness: 0.1, roughness: 0.5 });
+
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.22, 0.22), bodyMat);
+      parent.add(body);
+
+      const leftPanel = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.03, 0.48), panelMat);
+      leftPanel.position.x = -0.92;
+      parent.add(leftPanel);
+
+      const rightPanel = leftPanel.clone();
+      rightPanel.position.x = 0.92;
+      parent.add(rightPanel);
+
+      const module = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.5, 24), bodyMat);
+      module.rotation.z = Math.PI / 2;
+      module.position.z = 0.34;
+      parent.add(module);
+    }
+
+    function addFloatingLabel(parent, text) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 512;
+      canvas.height = 128;
+      const ctx = canvas.getContext("2d");
+
+      ctx.fillStyle = "rgba(0,0,0,0.72)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = "rgba(255,255,255,0.9)";
+      ctx.lineWidth = 4;
+      ctx.strokeRect(6, 6, canvas.width - 12, canvas.height - 12);
+      ctx.fillStyle = "white";
+      ctx.font = "bold 42px system-ui";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas) }));
+      sprite.scale.set(0.9, 0.22, 1);
+      sprite.position.y = 0.95;
+      parent.add(sprite);
+    }
+
+    function fitModelToTargetSize(model, targetSizeMeters) {
+      const box = new THREE.Box3().setFromObject(model);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+
+      const maxAxis = Math.max(size.x, size.y, size.z);
+      if (maxAxis > 0) {
+        model.scale.setScalar(targetSizeMeters / maxAxis);
+      }
+
+      const centeredBox = new THREE.Box3().setFromObject(model);
+      const center = new THREE.Vector3();
+      centeredBox.getCenter(center);
+      model.position.sub(center);
+    }
+
+    function resetModel() {
+      if (!station) return;
+
+      station.traverse((obj) => {
+        obj.geometry?.dispose?.();
+
+        if (obj.material) {
+          const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+          materials.forEach((material) => {
+            material.map?.dispose?.();
+            material.dispose?.();
+          });
+        }
       });
 
-      if (!gl) {
-        throw new Error("WebGL context could not be created");
-      }
-
-      if (gl.makeXRCompatible) {
-        await gl.makeXRCompatible();
-      }
-
-      const layer = new XRWebGLLayer(session, gl);
-      session.updateRenderState({ baseLayer: layer });
-
-      activeGl = gl;
-      activeReferenceSpace = await session.requestReferenceSpace("local");
-      session.requestAnimationFrame(onXRFrame);
+      scene.remove(station);
+      station = null;
     }
 
-    function onXRFrame(time, frame) {
-      const session = frame.session;
+    function render() {
+      if (renderer.xr.isPresenting && pendingAutoPlaceFrames > 0) {
+        pendingAutoPlaceFrames -= 1;
 
-      if (session !== activeSession || !activeGl || !activeReferenceSpace) {
-        return;
+        if (pendingAutoPlaceFrames === 0 && !station) {
+          placeModelTwoMetersAhead();
+        }
       }
 
-      session.requestAnimationFrame(onXRFrame);
-
-      const pose = frame.getViewerPose(activeReferenceSpace);
-      if (!pose) {
-        return;
+      if (station) {
+        station.rotation.y += 0.006;
       }
 
-      const layer = session.renderState.baseLayer;
-      activeGl.bindFramebuffer(activeGl.FRAMEBUFFER, layer.framebuffer);
-      activeGl.clearColor(0, 0, 0, 0);
-      activeGl.clearDepth(1);
-
-      for (const view of pose.views) {
-        const viewport = layer.getViewport(view);
-        activeGl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
-        activeGl.clear(activeGl.COLOR_BUFFER_BIT | activeGl.DEPTH_BUFFER_BIT);
-      }
-
-      if (!result.firstXRFrame) {
-        result.firstXRFrame = true;
-        setCheck("launch", "pass", "התקבל פריים AR ראשון עם XRWebGLLayer. אם עדיין לא רואים מצלמה, זו כבר התנהגות של הדפדפן/המכשיר ולא רק requestSession.");
-        renderDetails();
-      }
+      renderer.render(scene, camera);
     }
 
-    async function copyResult() {
-      renderDetails();
-
-      try {
-        await navigator.clipboard.writeText(detailsEl.textContent);
-        copyBtn.textContent = "הועתק";
-        window.setTimeout(() => {
-          copyBtn.textContent = "העתק תוצאת בדיקה";
-        }, 1200);
-      } catch {
-        copyBtn.textContent = "לא ניתן להעתיק";
-        window.setTimeout(() => {
-          copyBtn.textContent = "העתק תוצאת בדיקה";
-        }, 1200);
-      }
+    function getCameraPose(position, direction) {
+      const xrCamera = renderer.xr.isPresenting ? renderer.xr.getCamera(camera) : camera;
+      xrCamera.updateMatrixWorld(true);
+      xrCamera.getWorldPosition(position);
+      xrCamera.getWorldDirection(direction);
     }
 
-    function setCheck(id, state, detail) {
-      const el = checks[id];
-      el.dataset.state = state;
-      el.querySelector(".check-detail").textContent = detail;
-      el.querySelector(".check-detail").classList.add("he");
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
     }
 
-    function canCreateWebGLContext() {
-      const canvas = document.createElement("canvas");
-      return Boolean(canvas.getContext("webgl") || canvas.getContext("experimental-webgl"));
+    function setStatus(message) {
+      statusEl.textContent = message;
+    }
+
+    function logDetails(data) {
+      fallbackPanel.classList.add("visible");
+      fallbackPanel.textContent = JSON.stringify(data, null, 2);
     }
 
     function formatError(error) {
-      const simple = plainError(error);
-      return `${simple.name || "Error"}: ${simple.message || "אין הודעת שגיאה"}`;
-    }
-
-    function explainLaunchError(error) {
-      const simple = plainError(error);
-      const text = `${simple.name || ""} ${simple.message || ""}`.toLowerCase();
-
-      if (text.includes("specified session configuration") || simple.name === "NotSupportedError") {
-        return "מאחר שהבדיקה הזו רצה בלי configuration בכלל, המשמעות היא בדרך כלל שאין תמיכת immersive-ar פעילה במכשיר, ב־Chrome או ב־Google Play Services for AR.";
-      }
-
-      if (simple.name === "SecurityError" || simple.name === "NotAllowedError") {
-        return "זה מצביע על הרשאה שנחסמה, policy, או בעיית secure context.";
-      }
-
-      if (simple.name === "InvalidStateError") {
-        return "ייתכן שכבר יש session פתוח או שהדפדפן עדיין מסיים ניסיון קודם.";
-      }
-
-      return "אם זה נכשל רק במכשיר מסוים, בדוק ש־Google Play Services for AR מותקן ומעודכן, ושזה Chrome מלא ולא WebView.";
+      const plain = plainError(error);
+      return `${plain.name || "Error"}: ${plain.message || "אין פירוט שגיאה"}`;
     }
 
     function plainError(error) {
       if (!error) {
-        return null;
+        return { name: null, message: null };
       }
 
       return {
         name: error.name || null,
-        message: error.message || String(error),
-        code: error.code || null
+        message: error.message || String(error)
       };
-    }
-
-    function renderDetails() {
-      detailsEl.textContent = JSON.stringify(result, null, 2);
     }
   </script>
 </body>

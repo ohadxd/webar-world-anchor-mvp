@@ -1,18 +1,12 @@
-# WebXR AR Support Check
+# WebXR AR Model Loader
 
-דף בדיקה מינימלי לתמיכת WebXR AR במכשיר.
+דמו WebXR לאנדרואיד Chrome:
 
-הבדיקה עושה ארבעה דברים:
-
-1. מוודאת שהדף רץ ב-secure context (`https://` או `localhost`).
-2. בודקת אם `navigator.xr` קיים.
-3. מריצה `navigator.xr.isSessionSupported("immersive-ar")`.
-4. בלחיצה על הכפתור, מריצה `navigator.xr.requestSession("immersive-ar")` בלי `dom-overlay`, בלי `hit-test`, ובלי `requiredFeatures`.
-5. אם ה-session נפתח, מחברת `XRWebGLLayer` ומריצה `requestAnimationFrame` כדי לבדוק שגם camera passthrough מוצג בפועל.
-
-אם שלבים 4-5 מצליחים, המכשיר תומך WebXR AR בפועל.
-
-אם שלב 4 מחזיר `The specified session configuration is not supported`, למרות שאין configuration בכלל, המשמעות היא בדרך כלל ש-Chrome / המכשיר / Google Play Services for AR לא יכולים לפתוח `immersive-ar`.
+- פותח מצלמת AR דרך `immersive-ar`.
+- מציג X ליציאה מ-AR כאשר `dom-overlay` נתמך.
+- מציג כפתור "טען מודל 2 מטר קדימה" על מסך המצלמה כאשר `dom-overlay` נתמך.
+- טוען את `models/iss.glb` במרחק 2 מטר קדימה מהמשתמש.
+- אם `dom-overlay` לא נתמך אבל AR כן נפתח, הדף פותח AR מינימלי ומציב את המודל אוטומטית.
 
 ## דרישות
 
@@ -26,3 +20,11 @@
 הפרויקט סטטי. אפשר להעלות ל-GitHub Pages ולפתוח באנדרואיד:
 
 `https://funlab.co.il/webar-world-anchor-mvp/`
+
+אם אחרי deploy עדיין רואים גרסה ישנה, פתח עם cache-buster:
+
+`https://funlab.co.il/webar-world-anchor-mvp/?v=ar-model-loader-1`
+
+## הערה לאייפון
+
+Safari באייפון לא תומך באותו `WebXR immersive-ar`. בשביל אייפון צריך fallback נפרד כמו AR Quick Look עם קובץ `.usdz`, או אפליקציה native עם ARKit.
