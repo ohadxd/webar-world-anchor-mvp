@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>WebAR World Anchor MVP</title>
+  <link rel="icon" href="data:," />
   <style>
     html, body {
       margin: 0;
@@ -59,6 +60,12 @@
       color: #06111f;
       background: white;
       box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    }
+
+    button.action:disabled {
+      opacity: 0.48;
+      cursor: not-allowed;
+      box-shadow: none;
     }
 
     button.secondary {
@@ -135,13 +142,23 @@
     a {
       color: #fff;
     }
+
+    canvas {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
+    }
   </style>
 </head>
 <body>
   <div id="infoPanel">
     <div id="title">משימת AR: עגינה לתחנת החלל</div>
     <div id="status">
-      לחץ על Start AR, ואז על “טען תחנת חלל 2 מטר קדימה”. לך פיזית אל התחנה; כשאתה קרוב מספיק הדף יתהפך.
+      לחץ על Start AR ואשר מצלמה. אחרי שהמצלמה נפתחת, טען את תחנת החלל 2 מטר קדימה.
     </div>
   </div>
 
@@ -160,9 +177,9 @@
   </div>
 
   <script type="module">
-    import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
-    import { ARButton } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/ARButton.js";
-    import { GLTFLoader } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js";
+    import * as THREE from "https://esm.sh/three@0.160.0";
+    import { ARButton } from "https://esm.sh/three@0.160.0/examples/jsm/webxr/ARButton.js";
+    import { GLTFLoader } from "https://esm.sh/three@0.160.0/examples/jsm/loaders/GLTFLoader.js";
 
     const statusEl = document.getElementById("status");
     const placeBtn = document.getElementById("placeBtn");
@@ -176,10 +193,10 @@
     let stationPlaced = false;
     let completed = false;
     let holdTimer = 0;
+    const clock = new THREE.Clock();
 
-    // אפשר להחליף לנתיב מקומי:
-    // const MODEL_URL = "./models/iss.glb";
-    const MODEL_URL = "https://modelviewer.dev/shared-assets/models/Astronaut.glb";
+    const MODEL_URL = "./models/iss.glb";
+    const TARGET_MODEL_SIZE_METERS = 1.25;
 
     const TRIGGER_DISTANCE_METERS = 0.75;
     const HOLD_SECONDS = 1.35;
@@ -195,6 +212,7 @@
         antialias: true,
         alpha: true
       });
+      renderer.setClearColor(0x000000, 0);
       renderer.setPixelRatio(window.devicePixelRatio);
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.xr.enabled = true;
@@ -212,14 +230,20 @@
 
       window.addEventListener("resize", onWindowResize);
       placeBtn.addEventListener("click", placeStationTwoMetersAhead);
+      placeBtn.disabled = true;
       resetBtn.addEventListener("click", resetMission);
 
       renderer.setAnimationLoop(render);
     }
 
     function addStartARButton() {
+      if (!window.isSecureContext) {
+        statusEl.innerHTML = "WebXR דורש HTTPS או localhost. אם הדף פתוח ב־HTTP רגיל, הדפדפן לא יפתח מצלמה.";
+        return;
+      }
+
       if (!("xr" in navigator)) {
-        statusEl.innerHTML = "המכשיר/דפדפן לא תומך WebXR. נסה Chrome באנדרואיד עם ARCore.";
+        statusEl.innerHTML = "המכשיר או הדפדפן לא חושף WebXR. נסה Chrome באנדרואיד עם Google Play Services for AR.";
         return;
       }
 
@@ -234,14 +258,46 @@
       arButton.style.borderRadius = "16px";
       arButton.style.padding = "12px 18px";
       arButton.style.fontWeight = "800";
+      arButton.addEventListener("click", () => {
+        statusEl.textContent = "מבקש הרשאת מצלמה וכניסה ל־AR...";
+      });
       document.body.appendChild(arButton);
+
+      navigator.xr.isSessionSupported("immersive-ar")
+        .then((supported) => {
+          if (!supported) {
+            statusEl.textContent = "AR לא נתמך במכשיר הזה. נדרש Chrome באנדרואיד עם ARCore פעיל.";
+            return;
+          }
+          statusEl.textContent = "מוכן. לחץ Start AR ואשר מצלמה.";
+        })
+        .catch(() => {
+          statusEl.textContent = "לא הצלחתי לבדוק תמיכת AR. ודא שהדף רץ ב־HTTPS ונסה שוב.";
+        });
+
+      renderer.xr.addEventListener("sessionstart", () => {
+        placeBtn.disabled = false;
+        statusEl.textContent = "המצלמה פעילה. לחץ על טעינת תחנת החלל כדי להציב אותה בחדר.";
+      });
+
+      renderer.xr.addEventListener("sessionend", () => {
+        placeBtn.disabled = true;
+        stationPlaced = false;
+        holdTimer = 0;
+        progressEl.style.width = "0%";
+        progressWrap.style.display = "none";
+        removeStation();
+        if (!completed) {
+          statusEl.textContent = "יצאת מ־AR. לחץ Start AR כדי לפתוח שוב את המצלמה.";
+        }
+      });
     }
 
     function placeStationTwoMetersAhead() {
       if (completed) return;
 
       if (!renderer.xr.isPresenting) {
-        statusEl.textContent = "קודם לחץ Start AR ואשר מצלמה.";
+        statusEl.textContent = "קודם לחץ Start AR ואשר הרשאת מצלמה.";
         return;
       }
 
@@ -249,12 +305,15 @@
 
       const camPos = new THREE.Vector3();
       const forward = new THREE.Vector3();
-      camera.getWorldPosition(camPos);
-      camera.getWorldDirection(forward);
+      getCameraPose(camPos, forward);
 
       // כדי שהמודל יהיה קדימה בחדר ולא עף למעלה/למטה בגלל הטיית הטלפון:
       forward.y = 0;
-      forward.normalize();
+      if (forward.lengthSq() < 0.0001) {
+        forward.set(0, 0, -1);
+      } else {
+        forward.normalize();
+      }
 
       const targetPos = camPos.clone().add(forward.multiplyScalar(2.0));
       targetPos.y = camPos.y - 0.15;
@@ -267,7 +326,7 @@
       addWaypointRing(station);
       loadModelInto(station);
 
-      statusEl.textContent = "תחנת החלל נטענה 2 מטר קדימה. לך אליה עד שהמד יתמלא.";
+      statusEl.textContent = "מציב תחנת חלל 2 מטר קדימה וטוען מודל...";
       progressWrap.style.display = "block";
       progressEl.style.width = "0%";
       holdTimer = 0;
@@ -280,20 +339,44 @@
         MODEL_URL,
         (gltf) => {
           const model = gltf.scene;
-          model.scale.setScalar(0.45);
-          model.position.set(0, 0, 0);
+          fitModelToTargetSize(model, TARGET_MODEL_SIZE_METERS);
           parent.add(model);
 
           addFloatingLabel(parent, "ISS TARGET");
+          statusEl.textContent = "תחנת החלל מוכנה. לך אל טבעת העגינה עד שהמד יתמלא.";
         },
-        undefined,
-        () => {
+        (event) => {
+          if (!event.lengthComputable) {
+            statusEl.textContent = "טוען מודל ISS...";
+            return;
+          }
+          const percent = Math.round((event.loaded / event.total) * 100);
+          statusEl.textContent = `טוען מודל ISS... ${percent}%`;
+        },
+        (error) => {
+          console.error("Failed to load GLB model", error);
           // fallback אם GLB לא נטען
           createFallbackSpaceStation(parent);
           addFloatingLabel(parent, "ISS TARGET");
-          statusEl.textContent = "ה־GLB לא נטען, אז נטען מודל בדיקה פנימי. להחלפה: שים models/iss.glb ועדכן MODEL_URL.";
+          statusEl.textContent = "ה־GLB המקומי לא נטען, אז נטען מודל בדיקה פנימי. בדוק שהקובץ models/iss.glb קיים בפריסה.";
         }
       );
+    }
+
+    function fitModelToTargetSize(model, targetSizeMeters) {
+      const box = new THREE.Box3().setFromObject(model);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+
+      const maxAxis = Math.max(size.x, size.y, size.z);
+      if (maxAxis > 0) {
+        model.scale.setScalar(targetSizeMeters / maxAxis);
+      }
+
+      const centeredBox = new THREE.Box3().setFromObject(model);
+      const center = new THREE.Vector3();
+      centeredBox.getCenter(center);
+      model.position.sub(center);
     }
 
     function createFallbackSpaceStation(parent) {
@@ -361,22 +444,25 @@
     }
 
     function render() {
+      const delta = clock.getDelta();
+
       if (stationPlaced && station && !completed && renderer.xr.isPresenting) {
-        checkDistanceTrigger();
+        checkDistanceTrigger(delta);
         station.rotation.y += 0.006;
       }
 
       renderer.render(scene, camera);
     }
 
-    function checkDistanceTrigger() {
+    function checkDistanceTrigger(delta) {
       const camPos = new THREE.Vector3();
-      camera.getWorldPosition(camPos);
+      const forward = new THREE.Vector3();
+      getCameraPose(camPos, forward);
 
       const distance = camPos.distanceTo(station.position);
 
       if (distance < TRIGGER_DISTANCE_METERS) {
-        holdTimer += renderer.xr.getSession() ? 1 / 60 : 0;
+        holdTimer += delta;
         const percent = Math.min(100, (holdTimer / HOLD_SECONDS) * 100);
         progressEl.style.width = `${percent}%`;
         statusEl.textContent = `אתה באזור העגינה. הישאר רגע... ${Math.round(percent)}%`;
@@ -389,6 +475,13 @@
         progressEl.style.width = "0%";
         statusEl.textContent = `מרחק מהתחנה: ${distance.toFixed(2)} מטר. התקרב לטבעת העגינה.`;
       }
+    }
+
+    function getCameraPose(position, direction) {
+      const activeCamera = renderer.xr.isPresenting ? renderer.xr.getCamera(camera) : camera;
+      activeCamera.updateMatrixWorld(true);
+      activeCamera.getWorldPosition(position);
+      activeCamera.getWorldDirection(direction);
     }
 
     function completeStation() {
