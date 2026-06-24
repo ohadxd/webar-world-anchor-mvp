@@ -161,6 +161,15 @@
       color: var(--muted);
       font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
     }
+
+    #xrCanvas {
+      position: fixed;
+      inset: 0;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
@@ -204,7 +213,7 @@
         <div class="dot"></div>
         <div>
           <div class="check-title">פתיחת AR בפועל</div>
-          <div class="check-detail">לחיצה על הכפתור תבקש הרשאת מצלמה ותנסה requestSession("immersive-ar") בלי שום configuration.</div>
+          <div class="check-detail">לחיצה על הכפתור תבקש הרשאת מצלמה, תפתח requestSession("immersive-ar"), ותחבר XRWebGLLayer שקוף כדי לראות מצלמה.</div>
         </div>
       </div>
     </section>
@@ -214,11 +223,14 @@
     </section>
   </main>
 
+  <canvas id="xrCanvas" aria-hidden="true"></canvas>
+
   <script>
     const summaryEl = document.getElementById("summary");
     const runBtn = document.getElementById("runBtn");
     const copyBtn = document.getElementById("copyBtn");
     const detailsEl = document.getElementById("details");
+    const xrCanvas = document.getElementById("xrCanvas");
 
     const checks = {
       secure: document.getElementById("secureCheck"),
@@ -232,11 +244,16 @@
       userAgent: navigator.userAgent,
       secureContext: window.isSecureContext,
       hasNavigatorXR: false,
+      hasXRWebGLLayer: "XRWebGLLayer" in window,
+      hasWebGL: false,
       isSessionSupported: null,
       launch: null,
+      firstXRFrame: false,
       error: null
     };
     let activeSession = null;
+    let activeGl = null;
+    let activeReferenceSpace = null;
 
     boot();
 
@@ -253,8 +270,10 @@
         ? "navigator.xr קיים בדפדפן."
         : "navigator.xr לא קיים. זה בדרך כלל אומר שהדפדפן או הסביבה לא תומכים WebXR.");
 
-      if (!window.isSecureContext || !result.hasNavigatorXR) {
-        setCheck("support", "fail", "אי אפשר להמשיך לבדיקת immersive-ar בלי secure context ו־navigator.xr.");
+      result.hasWebGL = canCreateWebGLContext();
+
+      if (!window.isSecureContext || !result.hasNavigatorXR || !result.hasXRWebGLLayer || !result.hasWebGL) {
+        setCheck("support", "fail", "אי אפשר להמשיך בלי secure context, navigator.xr, XRWebGLLayer ו־WebGL.");
         summaryEl.textContent = "המכשיר או הדפדפן לא עוברים את תנאי הבסיס ל־WebXR AR.";
         renderDetails();
         return;
@@ -285,22 +304,33 @@
     async function runLaunchTest() {
       runBtn.disabled = true;
       result.launch = "pending";
+      result.firstXRFrame = false;
       result.error = null;
-      setCheck("launch", "pending", "מבקש הרשאת מצלמה ומנסה לפתוח requestSession(\"immersive-ar\") בלי dom-overlay, בלי hit-test ובלי requiredFeatures.");
-      summaryEl.textContent = "אם מופיעה בקשת מצלמה, אשר אותה. אם AR נפתח, הוא יישאר פתוח עד שתצא ממנו ידנית.";
+      setCheck("launch", "pending", "מבקש הרשאת מצלמה, פותח requestSession(\"immersive-ar\"), ומחבר XRWebGLLayer שקוף כדי שהמצלמה תופיע.");
+      summaryEl.textContent = "אם מופיעה בקשת מצלמה, אשר אותה. אם AR נפתח, המצלמה תישאר פתוחה עד שתצא ידנית.";
       renderDetails();
 
+      let session = null;
+
       try {
-        const session = await navigator.xr.requestSession("immersive-ar");
+        session = await navigator.xr.requestSession("immersive-ar");
         activeSession = session;
         session.addEventListener("end", onSessionEnded, { once: true });
+        await startXRPresentation(session);
 
         result.launch = "pass";
-        setCheck("launch", "pass", "requestSession(\"immersive-ar\") נפתח בהצלחה ונשאר פתוח. צא מה־AR דרך בקרת הדפדפן/המערכת.");
+        setCheck("launch", "pass", "ה־XRSession נפתח, שכבת WebGL חוברה, והדף ממתין לפריים AR ראשון.");
         summaryEl.textContent = "תוצאה: המכשיר תומך WebXR AR. ה־AR לא ייסגר אוטומטית.";
         runBtn.textContent = "AR פתוח";
         renderDetails();
       } catch (error) {
+        if (session) {
+          session.end().catch(() => {});
+        }
+
+        activeSession = null;
+        activeGl = null;
+        activeReferenceSpace = null;
         result.launch = "fail";
         result.error = plainError(error);
         setCheck("launch", "fail", `${formatError(error)} ${explainLaunchError(error)}`);
@@ -312,11 +342,70 @@
 
     function onSessionEnded() {
       activeSession = null;
+      activeGl = null;
+      activeReferenceSpace = null;
       runBtn.disabled = false;
       runBtn.textContent = "בדוק שוב פתיחת AR במצלמה";
       setCheck("launch", "pass", "ה־AR נפתח בהצלחה ואז נסגר על ידי המשתמש או הדפדפן.");
       summaryEl.textContent = "תוצאה: המכשיר תומך WebXR AR.";
       renderDetails();
+    }
+
+    async function startXRPresentation(session) {
+      const gl = xrCanvas.getContext("webgl", {
+        alpha: true,
+        antialias: true,
+        depth: true,
+        stencil: false,
+        preserveDrawingBuffer: false
+      });
+
+      if (!gl) {
+        throw new Error("WebGL context could not be created");
+      }
+
+      if (gl.makeXRCompatible) {
+        await gl.makeXRCompatible();
+      }
+
+      const layer = new XRWebGLLayer(session, gl);
+      session.updateRenderState({ baseLayer: layer });
+
+      activeGl = gl;
+      activeReferenceSpace = await session.requestReferenceSpace("local");
+      session.requestAnimationFrame(onXRFrame);
+    }
+
+    function onXRFrame(time, frame) {
+      const session = frame.session;
+
+      if (session !== activeSession || !activeGl || !activeReferenceSpace) {
+        return;
+      }
+
+      session.requestAnimationFrame(onXRFrame);
+
+      const pose = frame.getViewerPose(activeReferenceSpace);
+      if (!pose) {
+        return;
+      }
+
+      const layer = session.renderState.baseLayer;
+      activeGl.bindFramebuffer(activeGl.FRAMEBUFFER, layer.framebuffer);
+      activeGl.clearColor(0, 0, 0, 0);
+      activeGl.clearDepth(1);
+
+      for (const view of pose.views) {
+        const viewport = layer.getViewport(view);
+        activeGl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
+        activeGl.clear(activeGl.COLOR_BUFFER_BIT | activeGl.DEPTH_BUFFER_BIT);
+      }
+
+      if (!result.firstXRFrame) {
+        result.firstXRFrame = true;
+        setCheck("launch", "pass", "התקבל פריים AR ראשון עם XRWebGLLayer. אם עדיין לא רואים מצלמה, זו כבר התנהגות של הדפדפן/המכשיר ולא רק requestSession.");
+        renderDetails();
+      }
     }
 
     async function copyResult() {
@@ -341,6 +430,11 @@
       el.dataset.state = state;
       el.querySelector(".check-detail").textContent = detail;
       el.querySelector(".check-detail").classList.add("he");
+    }
+
+    function canCreateWebGLContext() {
+      const canvas = document.createElement("canvas");
+      return Boolean(canvas.getContext("webgl") || canvas.getContext("experimental-webgl"));
     }
 
     function formatError(error) {

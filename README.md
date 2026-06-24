@@ -8,8 +8,9 @@
 2. בודקת אם `navigator.xr` קיים.
 3. מריצה `navigator.xr.isSessionSupported("immersive-ar")`.
 4. בלחיצה על הכפתור, מריצה `navigator.xr.requestSession("immersive-ar")` בלי `dom-overlay`, בלי `hit-test`, ובלי `requiredFeatures`.
+5. אם ה-session נפתח, מחברת `XRWebGLLayer` ומריצה `requestAnimationFrame` כדי לבדוק שגם camera passthrough מוצג בפועל.
 
-אם שלב 4 מצליח, המכשיר תומך WebXR AR בפועל.
+אם שלבים 4-5 מצליחים, המכשיר תומך WebXR AR בפועל.
 
 אם שלב 4 מחזיר `The specified session configuration is not supported`, למרות שאין configuration בכלל, המשמעות היא בדרך כלל ש-Chrome / המכשיר / Google Play Services for AR לא יכולים לפתוח `immersive-ar`.
 
