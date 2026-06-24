@@ -1,0 +1,1 @@
+שים כאן iss.glb ועדכן את MODEL_URL בקובץ index.html ל- ./models/iss.glb
